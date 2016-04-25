@@ -9,6 +9,8 @@
 #include <regstr.h>
 #include <strsafe.h>
 
+#include <stdbool.h>
+
 #include "gs_usb.h"
 #define MAX_DEVPATH_LENGTH 256
 
@@ -167,45 +169,23 @@ BOOL Initialize_Device(struct cl_info *devInfo)
   return bResult;
 }
 
-BOOL SendDatatoDefaultEndpoint(WINUSB_INTERFACE_HANDLE hDeviceHandle)
+bool sendInterfaceRequest(WINUSB_INTERFACE_HANDLE hnd, uint8_t bRequest, uint8_t wIndex, uint16_t wValue, uint8_t *buf, uint16_t len)
 {
-    if (hDeviceHandle==INVALID_HANDLE_VALUE)
-    {
-        return FALSE;
+    if (hnd==INVALID_HANDLE_VALUE) {
+        return false;
     }
 
-    BOOL bResult = TRUE;
+    WINUSB_SETUP_PACKET packet;
+    ZeroMemory(&packet, sizeof(WINUSB_SETUP_PACKET));
 
+    packet.RequestType = 0x41; // Vendor Interface Request
+    packet.Request = bRequest;
+    packet.Value = wValue;
+    packet.Index = wIndex;
+    packet.Length = len;
 
-    WINUSB_SETUP_PACKET SetupPacket;
-    ZeroMemory(&SetupPacket, sizeof(WINUSB_SETUP_PACKET));
     ULONG cbSent = 0;
-
-    SetupPacket.RequestType = 0x41; // Vendor Interface Request
-    SetupPacket.Index = 0; // Interface 0
-    SetupPacket.Request = 2; // Set Mode
-    SetupPacket.Value = 0; // CAN Channel 0
-    SetupPacket.Length = sizeof(UCHAR);
-
-    struct gs_device_mode {
-        uint32_t mode;
-        uint32_t flags;
-    } mode;
-    mode.mode = 1; // start
-    mode.flags = 0;
-
-    bResult = WinUsb_ControlTransfer(hDeviceHandle, SetupPacket, (PUCHAR)&mode, sizeof(struct gs_device_mode), &cbSent, 0);
-    if(!bResult)
-    {
-        goto done;
-    }
-
-    printf("started device.\n");
-
-
-done:
-    return bResult;
-
+    return WinUsb_ControlTransfer(hnd, packet, buf, len, &cbSent, 0);
 }
 
 int main(int argc, char *argv[])
@@ -218,7 +198,14 @@ int main(int argc, char *argv[])
 
     if (ok) {
         printf("found candleLight.\n");
-        SendDatatoDefaultEndpoint(devInfo.winUSBHandle);
+
+        struct gs_device_mode mode;
+        mode.mode = GS_CAN_MODE_START;
+        mode.flags = 0;
+        if (sendInterfaceRequest(devInfo.winUSBHandle, GS_USB_BREQ_MODE, 0, 0, (uint8_t*)&mode, sizeof(struct gs_device_mode))) {
+            printf("device started.");
+        }
+
     } else {
         printf("cannot find candleLight!\n");
     }
