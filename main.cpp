@@ -9,6 +9,7 @@
 #include <regstr.h>
 #include <strsafe.h>
 
+#include "gs_usb.h"
 #define MAX_DEVPATH_LENGTH 256
 
 BOOL GetDevicePath(LPGUID InterfaceGuid, wchar_t *DevicePath, size_t BufLen)

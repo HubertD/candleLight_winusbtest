@@ -14,3 +14,6 @@ SOURCES += main.cpp
 win32: LIBS += -lSetupApi
 win32: LIBS += -lOle32
 win32: LIBS += -lwinusb
+
+HEADERS += \
+    gs_usb.h
