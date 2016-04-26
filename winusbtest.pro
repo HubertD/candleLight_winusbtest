@@ -17,3 +17,4 @@ win32: LIBS += -lwinusb
 
 HEADERS += \
     ch_9.h \
+    gs_usb_def.h
