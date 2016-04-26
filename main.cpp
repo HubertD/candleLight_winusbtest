@@ -367,7 +367,12 @@ int main(int argc, char *argv[])
             while (true) {
                 struct gs_host_frame frame;
                 if (gsusb_read_frame(&dev, &frame, 1000)) {
-                    printf("Caught CAN frame: ID 0x%08x\n", frame.can_id);
+                    if (frame.echo_id==0xFFFFFFFF) {
+                        printf("Caught CAN frame: ID 0x%08x\n", frame.can_id);
+                        frame.can_id += 1;
+                        gsusb_send_frame(&dev, 0, &frame);
+                    }
+
                 } else {
                     printf("Timeout waiting for CAN data\n");
                 }
