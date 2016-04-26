@@ -7,6 +7,10 @@
 #define u32 uint32_t
 #define __packed __attribute__((packed))
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Device specific constants */
 enum gs_usb_breq {
     GS_USB_BREQ_HOST_FORMAT = 0,
@@ -115,3 +119,7 @@ struct gs_host_frame {
 #define GS_MAX_TX_URBS 10
 /* Only launch a max of GS_MAX_RX_URBS usb requests at a time. */
 #define GS_MAX_RX_URBS 30
+
+#ifdef __cplusplus
+}
+#endif
