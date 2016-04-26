@@ -2,6 +2,7 @@
 #include <QTimer>
 
 #include <winusb.h>
+#include <winbase.h>
 #include <stdio.h>
 #include <windows.h>
 #include <setupapi.h>
@@ -16,12 +17,21 @@
 
 #define MAX_DEVPATH_LENGTH 256
 
+struct rx_urb {
+    OVERLAPPED ovl;
+    uint8_t buf[64];
+};
+
 struct gsusb_device {
     WINUSB_INTERFACE_HANDLE winUSBHandle;
     UCHAR interfaceNumber;
     UCHAR deviceSpeed;
     UCHAR bulkInPipe;
     UCHAR bulkOutPipe;
+
+    struct rx_urb rxurbs[GS_MAX_RX_URBS];
+    HANDLE rxevents[GS_MAX_RX_URBS];
+
 };
 
 BOOL GetDevicePath(LPGUID InterfaceGuid, wchar_t *DevicePath, size_t BufLen)
@@ -296,11 +306,40 @@ bool gsusb_send_frame(struct gsusb_device *dev, uint16_t channel, struct gs_host
     return rc;
 }
 
+bool gsusb_prepare_read(struct gsusb_device *dev, unsigned urb_num)
+{
+    bool rc =  WinUsb_ReadPipe(
+        dev->winUSBHandle,
+        dev->bulkInPipe,
+        dev->rxurbs[urb_num].buf,
+        sizeof(dev->rxurbs[urb_num].buf),
+        NULL,
+        &dev->rxurbs[urb_num].ovl
+    );
+
+    return rc;
+}
+
+bool gsusb_read_frame(struct gsusb_device *dev, struct gs_host_frame *frame, uint32_t timeout_ms)
+{
+    bool retval = false;
+    DWORD rv = WaitForMultipleObjects(GS_MAX_RX_URBS, dev->rxevents, false, timeout_ms);
+    if ( (rv >= WAIT_OBJECT_0) && (rv < WAIT_OBJECT_0 + GS_MAX_RX_URBS) ) {
+        DWORD urb_num = rv - WAIT_OBJECT_0;
+        DWORD bytes_transfered;
+        if (WinUsb_GetOverlappedResult(dev->winUSBHandle, &dev->rxurbs[urb_num].ovl, &bytes_transfered, false)) {
+            if (bytes_transfered == sizeof(*frame)) {
+                memcpy(frame, dev->rxurbs[urb_num].buf, sizeof(*frame));
+            }
+            gsusb_prepare_read(dev, urb_num);
+            retval = true;
+        }
+    }
+    return retval;
+}
+
 int main(int argc, char *argv[])
 {
-    LPGUID _lpGuid = (LPGUID)malloc (sizeof(GUID));
-    HRESULT result = CLSIDFromString (L"{c15b4308-04d3-11e6-b3ea-6057189e6443}", _lpGuid);
-
     struct gsusb_device dev;
     BOOL ok = Initialize_Device(&dev);
 
@@ -315,7 +354,26 @@ int main(int argc, char *argv[])
         struct gs_device_config dconf;
         ok = gsusb_get_device_info(&dev, &dconf);
         if (ok) {
+            struct gs_device_bittiming timing;
+            // TODO set bitrate
+            memset(dev.rxurbs, 0, sizeof(dev.rxurbs));
+            for (unsigned i=0; i<GS_MAX_RX_URBS; i++) {
+                dev.rxevents[i] = CreateEvent(NULL, true, false, NULL);
+                dev.rxurbs[i].ovl.hEvent = dev.rxevents[i];
+                gsusb_prepare_read(&dev, i);
+            }
             ok = gsusb_set_device_mode(&dev, 0, GS_CAN_MODE_START, 0);
+
+            while (true) {
+                struct gs_host_frame frame;
+                if (gsusb_read_frame(&dev, &frame, 1000)) {
+                    printf("Caught CAN frame: ID 0x%08x\n", frame.can_id);
+                } else {
+                    printf("Timeout waiting for CAN data\n");
+                }
+            }
+
+
         }
 
         if (ok) {
