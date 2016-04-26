@@ -21,6 +21,8 @@ struct gsusb_device {
     UCHAR bulkInPipe;
     UCHAR bulkOutPipe;
 
+    struct gs_device_config dconf;
+    struct gs_device_bt_const bt_const;
     struct rx_urb rxurbs[GS_MAX_RX_URBS];
     HANDLE rxevents[GS_MAX_RX_URBS];
 
@@ -28,15 +30,11 @@ struct gsusb_device {
 
 bool gsusb_get_device_path(wchar_t *path, size_t len);
 bool gsusb_open(struct gsusb_device *dev, wchar_t *path);
-bool gsusb_set_host_format(struct gsusb_device *dev);
 bool gsusb_set_device_mode(struct gsusb_device *dev, uint16_t channel, uint32_t mode, uint32_t flags);
 bool gsusb_reset(struct gsusb_device *dev);
-bool gsusb_get_device_info(struct gsusb_device *dev, struct gs_device_config *dconf);
-bool gsusb_get_bittiming_const(struct gsusb_device *dev, uint16_t channel, struct gs_device_bt_const *data);
 bool gsusb_set_bittiming(struct gsusb_device *dev, uint16_t channel, struct gs_device_bittiming *data);
 bool gsusb_send_frame(struct gsusb_device *dev, uint16_t channel, struct gs_host_frame *frame);
-bool gsusb_prepare_read(struct gsusb_device *dev, unsigned urb_num);
-bool gsusb_read_frame(struct gsusb_device *dev, struct gs_host_frame *frame, uint32_t timeout_ms);
+bool gsusb_recv_frame(struct gsusb_device *dev, struct gs_host_frame *frame, uint32_t timeout_ms);
 
 #ifdef __cplusplus
 }

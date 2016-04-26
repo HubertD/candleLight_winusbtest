@@ -8,6 +8,10 @@
 
 
 static bool usb_control_msg(WINUSB_INTERFACE_HANDLE hnd, uint8_t request, uint8_t requesttype, uint16_t value, uint16_t index, void *data, uint16_t size);
+static bool gsusb_prepare_read(struct gsusb_device *dev, unsigned urb_num);
+static bool gsusb_set_host_format(struct gsusb_device *dev);
+static bool gsusb_get_device_info(struct gsusb_device *dev, struct gs_device_config *dconf);
+static bool gsusb_get_bittiming_const(struct gsusb_device *dev, uint16_t channel, struct gs_device_bt_const *data);
 
 bool gsusb_get_device_path(wchar_t *path, size_t len)
 {
@@ -123,6 +127,30 @@ bool gsusb_open(struct gsusb_device *dev, wchar_t *path)
 
     }
 
+    if (!gsusb_set_host_format(dev)) {
+        printf("could not set host format.\n");
+        return false;
+    }
+
+    if (!gsusb_get_device_info(dev, &dev->dconf)) {
+        printf("could not read device info.\n");
+        return false;
+    }
+
+    if (!gsusb_get_bittiming_const(dev, 0, &dev->bt_const)) {
+        printf("could not read bit timing constraints from device.\n");
+        return false;
+    }
+
+    memset(dev->rxurbs, 0, sizeof(dev->rxurbs));
+    for (unsigned i=0; i<GS_MAX_RX_URBS; i++) {
+        HANDLE ev = CreateEvent(NULL, true, false, NULL);
+        dev->rxevents[i] = ev;
+        dev->rxurbs[i].ovl.hEvent = ev;
+        gsusb_prepare_read(dev, i);
+    }
+
+
     return true;
 }
 
@@ -141,7 +169,7 @@ static bool usb_control_msg(WINUSB_INTERFACE_HANDLE hnd, uint8_t request, uint8_
     return WinUsb_ControlTransfer(hnd, packet, (uint8_t*)data, size, &bytes_sent, 0);
 }
 
-bool gsusb_set_host_format(struct gsusb_device *dev)
+static bool gsusb_set_host_format(struct gsusb_device *dev)
 {
     struct gs_host_config hconf;
     hconf.byte_order = 0x0000beef;
@@ -183,7 +211,7 @@ bool gsusb_reset(struct gsusb_device *dev)
     return gsusb_set_device_mode(dev, 0, GS_CAN_MODE_RESET, 0);
 }
 
-bool gsusb_get_device_info(struct gsusb_device *dev, struct gs_device_config *dconf)
+static bool gsusb_get_device_info(struct gsusb_device *dev, struct gs_device_config *dconf)
 {
     bool rc = usb_control_msg(
         dev->winUSBHandle,
@@ -198,7 +226,7 @@ bool gsusb_get_device_info(struct gsusb_device *dev, struct gs_device_config *dc
     return rc;
 }
 
-bool gsusb_get_bittiming_const(struct gsusb_device *dev, uint16_t channel, struct gs_device_bt_const *data)
+static bool gsusb_get_bittiming_const(struct gsusb_device *dev, uint16_t channel, struct gs_device_bt_const *data)
 {
     bool rc = usb_control_msg(
         dev->winUSBHandle,
@@ -247,7 +275,7 @@ bool gsusb_send_frame(struct gsusb_device *dev, uint16_t channel, struct gs_host
     return rc;
 }
 
-bool gsusb_prepare_read(struct gsusb_device *dev, unsigned urb_num)
+static bool gsusb_prepare_read(struct gsusb_device *dev, unsigned urb_num)
 {
     bool rc =  WinUsb_ReadPipe(
         dev->winUSBHandle,
@@ -261,7 +289,7 @@ bool gsusb_prepare_read(struct gsusb_device *dev, unsigned urb_num)
     return rc;
 }
 
-bool gsusb_read_frame(struct gsusb_device *dev, struct gs_host_frame *frame, uint32_t timeout_ms)
+bool gsusb_recv_frame(struct gsusb_device *dev, struct gs_host_frame *frame, uint32_t timeout_ms)
 {
     bool retval = false;
     DWORD rv = WaitForMultipleObjects(GS_MAX_RX_URBS, dev->rxevents, false, timeout_ms);
