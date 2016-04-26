@@ -11,10 +11,18 @@
 
 #include <stdbool.h>
 
-#include "gs_usb.h"
+#include "gs_usb_def.h"
 #include "ch_9.h"
 
 #define MAX_DEVPATH_LENGTH 256
+
+struct gsusb_device {
+    WINUSB_INTERFACE_HANDLE winUSBHandle;
+    UCHAR interfaceNumber;
+    UCHAR deviceSpeed;
+    UCHAR bulkInPipe;
+    UCHAR bulkOutPipe;
+};
 
 BOOL GetDevicePath(LPGUID InterfaceGuid, wchar_t *DevicePath, size_t BufLen)
 {
@@ -101,16 +109,9 @@ HANDLE OpenDevice(LPGUID guid, BOOL bSync)
   return hDev;
 }
 
-struct cl_info {
-    WINUSB_INTERFACE_HANDLE winUSBHandle;
-    UCHAR interfaceNumber;
-    UCHAR deviceSpeed;
-    UCHAR bulkInPipe;
-    UCHAR bulkOutPipe;
-};
 
 
-BOOL Initialize_Device(struct cl_info *devInfo)
+BOOL Initialize_Device(struct gsusb_device *devInfo)
 {
   BOOL bResult;
   WINUSB_INTERFACE_HANDLE usbHandle;
@@ -189,7 +190,7 @@ bool usb_control_msg(WINUSB_INTERFACE_HANDLE hnd, uint8_t request, uint8_t reque
     return WinUsb_ControlTransfer(hnd, packet, (uint8_t*)data, size, &bytes_sent, 0);
 }
 
-bool gsusb_set_host_format(struct cl_info *dev)
+bool gsusb_set_host_format(struct gsusb_device *dev)
 {
     struct gs_host_config hconf;
     hconf.byte_order = 0x0000beef;
@@ -207,7 +208,7 @@ bool gsusb_set_host_format(struct cl_info *dev)
     return rc;
 }
 
-bool gsusb_set_device_mode(struct cl_info *dev, uint16_t channel, uint32_t mode, uint32_t flags)
+bool gsusb_set_device_mode(struct gsusb_device *dev, uint16_t channel, uint32_t mode, uint32_t flags)
 {
     struct gs_device_mode dm;
     dm.mode = mode;
@@ -226,7 +227,12 @@ bool gsusb_set_device_mode(struct cl_info *dev, uint16_t channel, uint32_t mode,
     return rc;
 }
 
-bool gsusb_get_device_info(struct cl_info *dev, struct gs_device_config *dconf)
+bool gsusb_reset(struct gsusb_device *dev)
+{
+    return gsusb_set_device_mode(dev, 0, GS_CAN_MODE_RESET, 0);
+}
+
+bool gsusb_get_device_info(struct gsusb_device *dev, struct gs_device_config *dconf)
 {
     bool rc = usb_control_msg(
         dev->winUSBHandle,
@@ -241,26 +247,75 @@ bool gsusb_get_device_info(struct cl_info *dev, struct gs_device_config *dconf)
     return rc;
 }
 
+bool gsusb_get_bittiming_const(struct gsusb_device *dev, uint16_t channel, struct gs_device_bt_const *data)
+{
+    bool rc = usb_control_msg(
+        dev->winUSBHandle,
+        GS_USB_BREQ_BT_CONST,
+        USB_DIR_IN|USB_TYPE_VENDOR|USB_RECIP_INTERFACE,
+        channel,
+        0,
+        data,
+        sizeof(*data)
+    );
+
+    return rc;
+}
+
+bool gsusb_set_bittiming(struct gsusb_device *dev, uint16_t channel, struct gs_device_bittiming *data)
+{
+    bool rc = usb_control_msg(
+        dev->winUSBHandle,
+        GS_USB_BREQ_BITTIMING,
+        USB_DIR_OUT|USB_TYPE_VENDOR|USB_RECIP_INTERFACE,
+        channel,
+        0,
+        data,
+        sizeof(*data)
+    );
+
+    return rc;
+}
+
+bool gsusb_send_frame(struct gsusb_device *dev, uint16_t channel, struct gs_host_frame *frame)
+{
+    unsigned long bytes_sent = 0;
+
+    frame->echo_id = 0;
+    frame->channel = channel;
+
+    bool rc = WinUsb_WritePipe(
+        dev->winUSBHandle,
+        dev->bulkOutPipe,
+        (uint8_t*)frame,
+        sizeof(*frame),
+        &bytes_sent,
+        0
+    );
+
+    return rc;
+}
+
 int main(int argc, char *argv[])
 {
     LPGUID _lpGuid = (LPGUID)malloc (sizeof(GUID));
     HRESULT result = CLSIDFromString (L"{c15b4308-04d3-11e6-b3ea-6057189e6443}", _lpGuid);
 
-    struct cl_info devInfo;
-    BOOL ok = Initialize_Device(&devInfo);
+    struct gsusb_device dev;
+    BOOL ok = Initialize_Device(&dev);
 
     if (ok) {
         printf("found candleLight.\n");
 
-        ok = gsusb_set_host_format(&devInfo);
+        ok = gsusb_set_host_format(&dev);
         if (!ok) {
             printf("could not set host format.");
         }
 
         struct gs_device_config dconf;
-        ok = gsusb_get_device_info(&devInfo, &dconf);
+        ok = gsusb_get_device_info(&dev, &dconf);
         if (ok) {
-            ok = gsusb_set_device_mode(&devInfo, 0, GS_CAN_MODE_START, 0);
+            ok = gsusb_set_device_mode(&dev, 0, GS_CAN_MODE_START, 0);
         }
 
         if (ok) {
