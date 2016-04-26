@@ -12,7 +12,7 @@
 
 #include <stdbool.h>
 
-#include "gs_usb_def.h"
+#include "gsusb_def.h"
 #include "ch_9.h"
 
 #define MAX_DEVPATH_LENGTH 256
