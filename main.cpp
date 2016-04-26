@@ -12,6 +12,8 @@
 #include <stdbool.h>
 
 #include "gs_usb.h"
+#include "ch_9.h"
+
 #define MAX_DEVPATH_LENGTH 256
 
 BOOL GetDevicePath(LPGUID InterfaceGuid, wchar_t *DevicePath, size_t BufLen)
@@ -101,6 +103,7 @@ HANDLE OpenDevice(LPGUID guid, BOOL bSync)
 
 struct cl_info {
     WINUSB_INTERFACE_HANDLE winUSBHandle;
+    UCHAR interfaceNumber;
     UCHAR deviceSpeed;
     UCHAR bulkInPipe;
     UCHAR bulkOutPipe;
@@ -141,6 +144,8 @@ BOOL Initialize_Device(struct cl_info *devInfo)
   }
   if(bResult)
   {
+    devInfo->interfaceNumber = ifaceDescriptor.bInterfaceNumber;
+
     for(int i=0;i<ifaceDescriptor.bNumEndpoints;i++)
     {
       bResult = WinUsb_QueryPipe(devInfo->winUSBHandle,
@@ -169,23 +174,71 @@ BOOL Initialize_Device(struct cl_info *devInfo)
   return bResult;
 }
 
-bool sendInterfaceRequest(WINUSB_INTERFACE_HANDLE hnd, uint8_t bRequest, uint8_t wIndex, uint16_t wValue, uint8_t *buf, uint16_t len)
+bool usb_control_msg(WINUSB_INTERFACE_HANDLE hnd, uint8_t request, uint8_t requesttype, uint16_t value, uint16_t index, void *data, uint16_t size)
 {
-    if (hnd==INVALID_HANDLE_VALUE) {
-        return false;
-    }
-
     WINUSB_SETUP_PACKET packet;
-    ZeroMemory(&packet, sizeof(WINUSB_SETUP_PACKET));
+    memset(&packet, 0, sizeof(packet));
 
-    packet.RequestType = 0x41; // Vendor Interface Request
-    packet.Request = bRequest;
-    packet.Value = wValue;
-    packet.Index = wIndex;
-    packet.Length = len;
+    packet.Request = request;
+    packet.RequestType = requesttype;
+    packet.Value = value;
+    packet.Index = index;
+    packet.Length = size;
 
-    ULONG cbSent = 0;
-    return WinUsb_ControlTransfer(hnd, packet, buf, len, &cbSent, 0);
+    unsigned long bytes_sent = 0;
+    return WinUsb_ControlTransfer(hnd, packet, (uint8_t*)data, size, &bytes_sent, 0);
+}
+
+bool gsusb_set_host_format(struct cl_info *dev)
+{
+    struct gs_host_config hconf;
+    hconf.byte_order = 0x0000beef;
+
+    bool rc = usb_control_msg(
+        dev->winUSBHandle,
+        GS_USB_BREQ_HOST_FORMAT,
+        USB_DIR_OUT|USB_TYPE_VENDOR|USB_RECIP_INTERFACE,
+        1,
+        dev->interfaceNumber,
+        &hconf,
+        sizeof(hconf)
+    );
+
+    return rc;
+}
+
+bool gsusb_set_device_mode(struct cl_info *dev, uint16_t channel, uint32_t mode, uint32_t flags)
+{
+    struct gs_device_mode dm;
+    dm.mode = mode;
+    dm.flags = flags;
+
+    bool rc = usb_control_msg(
+        dev->winUSBHandle,
+        GS_USB_BREQ_MODE,
+        USB_DIR_OUT|USB_TYPE_VENDOR|USB_RECIP_INTERFACE,
+        channel,
+        dev->interfaceNumber,
+        &dm,
+        sizeof(dm)
+    );
+
+    return rc;
+}
+
+bool gsusb_get_device_info(struct cl_info *dev, struct gs_device_config *dconf)
+{
+    bool rc = usb_control_msg(
+        dev->winUSBHandle,
+        GS_USB_BREQ_DEVICE_CONFIG,
+        USB_DIR_IN|USB_TYPE_VENDOR|USB_RECIP_INTERFACE,
+        1,
+        dev->interfaceNumber,
+        dconf,
+        sizeof(*dconf)
+    );
+
+    return rc;
 }
 
 int main(int argc, char *argv[])
@@ -199,10 +252,18 @@ int main(int argc, char *argv[])
     if (ok) {
         printf("found candleLight.\n");
 
-        struct gs_device_mode mode;
-        mode.mode = GS_CAN_MODE_START;
-        mode.flags = 0;
-        if (sendInterfaceRequest(devInfo.winUSBHandle, GS_USB_BREQ_MODE, 0, 0, (uint8_t*)&mode, sizeof(struct gs_device_mode))) {
+        ok = gsusb_set_host_format(&devInfo);
+        if (!ok) {
+            printf("could not set host format.");
+        }
+
+        struct gs_device_config dconf;
+        ok = gsusb_get_device_info(&devInfo, &dconf);
+        if (ok) {
+            ok = gsusb_set_device_mode(&devInfo, 0, GS_CAN_MODE_START, 0);
+        }
+
+        if (ok) {
             printf("device started.");
         }
 

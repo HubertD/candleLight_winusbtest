@@ -16,4 +16,5 @@ win32: LIBS += -lOle32
 win32: LIBS += -lwinusb
 
 HEADERS += \
-    gs_usb.h
+    gs_usb.h \
+    ch_9.h
