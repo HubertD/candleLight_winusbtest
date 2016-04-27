@@ -33,7 +33,11 @@ int main(int argc, char *argv[])
                 continue;
             }
 
-            printf("Caught CAN frame: ID 0x%08x\n", frame.can_id);
+            printf("Caught CAN frame: ID 0x%08x [%d]", frame.can_id, frame.can_dlc);
+            for (int i=0; i<frame.can_dlc; i++) {
+                 printf(" %02X", frame.data[i]);
+            }
+            printf("\n");
             frame.can_id += 1;
             gsusb_send_frame(&dev, 0, &frame);
 
