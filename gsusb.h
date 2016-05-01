@@ -11,6 +11,37 @@ extern "C" {
 #endif
 
 #define GSUSB_MAX_DEVICES 256
+
+typedef enum {
+    GSUSB_ERR_OK                  =   0,
+    GSUSB_ERR_CREATE_FILE         =  -1,
+    GSUSB_ERR_WINUSB_INITIALIZE   =  -2,
+    GSUSB_ERR_QUERY_INTERFACE     =  -3,
+    GSUSB_ERR_QUERY_PIPE          =  -4,
+    GSUSB_ERR_PARSE_IF_DESCR      =  -5,
+    GSUSB_ERR_SET_HOST_FORMAT     =  -6,
+    GSUSB_ERR_GET_DEVICE_INFO     =  -7,
+    GSUSB_ERR_GET_BITTIMING_CONST =  -8,
+    GSUSB_ERR_PREPARE_READ        =  -9,
+    GSUSB_ERR_SET_DEVICE_MODE     = -10,
+    GSUSB_ERR_SET_BITTIMING       = -11,
+    GSUSB_ERR_BITRATE_FCLK        = -12,
+    GSUSB_ERR_BITRATE_UNSUPPORTED = -13,
+    GSUSB_ERR_SEND_FRAME          = -14,
+    GSUSB_ERR_READ_TIMEOUT        = -15,
+    GSUSB_ERR_READ_WAIT           = -16,
+    GSUSB_ERR_READ_RESULT         = -17,
+    GSUSB_ERR_READ_SIZE           = -18,
+    GSUSB_ERR_SETUPDI_IF_DETAILS  = -19,
+    GSUSB_ERR_SETUPDI_IF_DETAILS2 = -20,
+    GSUSB_ERR_MALLOC              = -21,
+    GSUSB_ERR_PATH_LEN            = -22,
+    GSUSB_ERR_CLSID               = -23,
+    GSUSB_ERR_GET_DEVICES         = -24,
+    GSUSB_ERR_SETUPDI_IF_ENUM     = -25,
+
+} gsusb_err_t;
+
 typedef enum {
     gsusb_devstate_avail,
     gsusb_devstate_inuse
@@ -24,6 +55,7 @@ struct rx_urb {
 struct gsusb_device {
     wchar_t path[256];
     gsusb_devstate_t state;
+    gsusb_err_t last_error;
 
     HANDLE deviceHandle;
     WINUSB_INTERFACE_HANDLE winUSBHandle;

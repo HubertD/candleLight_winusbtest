@@ -19,6 +19,9 @@ static bool gsusb_close_device(struct gsusb_device *dev);
 
 static bool gsusb_open_device(struct gsusb_device *dev)
 {
+    memset(dev->rxevents, 0, sizeof(dev->rxevents));
+    memset(dev->rxurbs, 0, sizeof(dev->rxurbs));
+
     dev->deviceHandle = CreateFile(
         dev->path,
         GENERIC_WRITE | GENERIC_READ,
@@ -30,15 +33,18 @@ static bool gsusb_open_device(struct gsusb_device *dev)
     );
 
     if (dev->deviceHandle == INVALID_HANDLE_VALUE) {
+        dev->last_error = GSUSB_ERR_CREATE_FILE;
         return false;
     }
 
     if (!WinUsb_Initialize(dev->deviceHandle, &dev->winUSBHandle)) {
+        dev->last_error = GSUSB_ERR_WINUSB_INITIALIZE;
         goto close_handle;
     }
 
     USB_INTERFACE_DESCRIPTOR ifaceDescriptor;
     if (!WinUsb_QueryInterfaceSettings(dev->winUSBHandle, 0, &ifaceDescriptor)) {
+        dev->last_error = GSUSB_ERR_QUERY_INTERFACE;
         goto winusb_free;
     }
 
@@ -49,47 +55,44 @@ static bool gsusb_open_device(struct gsusb_device *dev)
 
         WINUSB_PIPE_INFORMATION pipeInfo;
         if (!WinUsb_QueryPipe(dev->winUSBHandle, 0, i, &pipeInfo)) {
+            dev->last_error = GSUSB_ERR_QUERY_PIPE;
             goto winusb_free;
         }
 
         if (pipeInfo.PipeType == UsbdPipeTypeBulk && USB_ENDPOINT_DIRECTION_IN(pipeInfo.PipeId)) {
-
             dev->bulkInPipe = pipeInfo.PipeId;
             pipes_found++;
-
-        } else if(pipeInfo.PipeType == UsbdPipeTypeBulk && USB_ENDPOINT_DIRECTION_OUT(pipeInfo.PipeId)) {
-
+        } else if (pipeInfo.PipeType == UsbdPipeTypeBulk && USB_ENDPOINT_DIRECTION_OUT(pipeInfo.PipeId)) {
             dev->bulkOutPipe = pipeInfo.PipeId;
             pipes_found++;
-
         } else {
-            printf("error parsing interface descriptor (unknown endpoint %d)\n", i);
+            dev->last_error = GSUSB_ERR_PARSE_IF_DESCR;
             goto winusb_free;
-
         }
 
     }
 
     if (pipes_found != 2) {
-        printf("error parsing interface descriptor (%d endpoints found, %d expected)\n", pipes_found, 2);
+        dev->last_error = GSUSB_ERR_PARSE_IF_DESCR;
         goto winusb_free;
     }
 
     if (!gsusb_set_host_format(dev)) {
-        printf("could not set host format.\n");
+        dev->last_error = GSUSB_ERR_SET_HOST_FORMAT;
         goto winusb_free;
     }
 
     if (!gsusb_get_device_info(dev, &dev->dconf)) {
-        printf("could not read device info.\n");
+        dev->last_error = GSUSB_ERR_GET_DEVICE_INFO;
         goto winusb_free;
     }
 
     if (!gsusb_get_bittiming_const(dev, 0, &dev->bt_const)) {
-        printf("could not read bit timing constraints from device.\n");
+        dev->last_error = GSUSB_ERR_GET_BITTIMING_CONST;
         goto winusb_free;
     }
 
+    dev->last_error = GSUSB_ERR_OK;
     return true;
 
 winusb_free:
@@ -100,28 +103,45 @@ close_handle:
     return false;
 }
 
+static bool gsusb_close_rxurbs(struct gsusb_device *dev)
+{
+    for (unsigned i=0; i<GS_MAX_RX_URBS; i++) {
+        if (dev->rxevents[i] != NULL) {
+            CloseHandle(dev->rxevents[i]);
+        }
+    }
+    return true;
+}
+
 static bool gsusb_close_device(struct gsusb_device *dev)
 {
+    gsusb_close_rxurbs(dev);
+
     WinUsb_Free(dev->winUSBHandle);
     dev->winUSBHandle = NULL;
     CloseHandle(dev->deviceHandle);
     dev->deviceHandle = NULL;
+
+    dev->last_error = GSUSB_ERR_OK;
     return true;
 }
 
 bool gsusb_open(struct gsusb_device *dev)
 {
     if (gsusb_open_device(dev)) {
-        memset(dev->rxurbs, 0, sizeof(dev->rxurbs));
         for (unsigned i=0; i<GS_MAX_RX_URBS; i++) {
             HANDLE ev = CreateEvent(NULL, true, false, NULL);
             dev->rxevents[i] = ev;
             dev->rxurbs[i].ovl.hEvent = ev;
-            gsusb_prepare_read(dev, i);
+            if (!gsusb_prepare_read(dev, i)) {
+                gsusb_close_rxurbs(dev);
+                return false; // keep last_error from prepare_read call
+            }
         }
+        dev->last_error = GSUSB_ERR_OK;
         return true;
     } else {
-        return false;
+        return false; // keep last_error from open_device call
     }
 }
 
@@ -155,6 +175,7 @@ static bool gsusb_set_host_format(struct gsusb_device *dev)
         sizeof(hconf)
     );
 
+    dev->last_error = rc ? GSUSB_ERR_OK : GSUSB_ERR_SET_HOST_FORMAT;
     return rc;
 }
 
@@ -174,6 +195,7 @@ bool gsusb_set_device_mode(struct gsusb_device *dev, uint16_t channel, uint32_t 
         sizeof(dm)
     );
 
+    dev->last_error = rc ? GSUSB_ERR_OK : GSUSB_ERR_SET_DEVICE_MODE;
     return rc;
 }
 
@@ -194,6 +216,7 @@ static bool gsusb_get_device_info(struct gsusb_device *dev, struct gs_device_con
         sizeof(*dconf)
     );
 
+    dev->last_error = rc ? GSUSB_ERR_OK : GSUSB_ERR_GET_DEVICE_INFO;
     return rc;
 }
 
@@ -209,6 +232,7 @@ static bool gsusb_get_bittiming_const(struct gsusb_device *dev, uint16_t channel
         sizeof(*data)
     );
 
+    dev->last_error = rc ? GSUSB_ERR_OK : GSUSB_ERR_GET_BITTIMING_CONST;
     return rc;
 }
 
@@ -224,6 +248,7 @@ bool gsusb_set_bittiming(struct gsusb_device *dev, uint16_t channel, struct gs_d
         sizeof(*data)
     );
 
+    dev->last_error = rc ? GSUSB_ERR_OK : GSUSB_ERR_SET_BITTIMING;
     return rc;
 }
 
@@ -232,6 +257,7 @@ bool gsusb_set_bitrate(struct gsusb_device *dev, uint16_t channel, uint32_t bitr
 
     if (dev->bt_const.fclk_can != 48000000) {
         /* this function only works for the candleLight base clock of 48MHz */
+        dev->last_error = GSUSB_ERR_BITRATE_FCLK;
         return false;
     }
 
@@ -285,6 +311,7 @@ bool gsusb_set_bitrate(struct gsusb_device *dev, uint16_t channel, uint32_t bitr
             break;
 
         default:
+            dev->last_error = GSUSB_ERR_BITRATE_UNSUPPORTED;
             return false;
     }
 
@@ -307,12 +334,13 @@ bool gsusb_send_frame(struct gsusb_device *dev, uint16_t channel, struct gs_host
         0
     );
 
+    dev->last_error = rc ? GSUSB_ERR_OK : GSUSB_ERR_SEND_FRAME;
     return rc;
 }
 
 static bool gsusb_prepare_read(struct gsusb_device *dev, unsigned urb_num)
 {
-    bool rc =  WinUsb_ReadPipe(
+    bool rc = WinUsb_ReadPipe(
         dev->winUSBHandle,
         dev->bulkInPipe,
         dev->rxurbs[urb_num].buf,
@@ -321,25 +349,46 @@ static bool gsusb_prepare_read(struct gsusb_device *dev, unsigned urb_num)
         &dev->rxurbs[urb_num].ovl
     );
 
-    return rc;
+    if (rc || (GetLastError()!=ERROR_IO_PENDING)) {
+        dev->last_error = GSUSB_ERR_PREPARE_READ;
+        return false;
+    } else {
+        dev->last_error = GSUSB_ERR_OK;
+        return true;
+    }
 }
 
 bool gsusb_recv_frame(struct gsusb_device *dev, struct gs_host_frame *frame, uint32_t timeout_ms)
 {
-    bool retval = false;
-    DWORD rv = WaitForMultipleObjects(GS_MAX_RX_URBS, dev->rxevents, false, timeout_ms);
-    if ( (rv >= WAIT_OBJECT_0) && (rv < WAIT_OBJECT_0 + GS_MAX_RX_URBS) ) {
-        DWORD urb_num = rv - WAIT_OBJECT_0;
-        DWORD bytes_transfered;
-        if (WinUsb_GetOverlappedResult(dev->winUSBHandle, &dev->rxurbs[urb_num].ovl, &bytes_transfered, false)) {
-            if (bytes_transfered == sizeof(*frame)) {
-                memcpy(frame, dev->rxurbs[urb_num].buf, sizeof(*frame));
-            }
-            gsusb_prepare_read(dev, urb_num);
-            retval = true;
-        }
+    DWORD wait_result = WaitForMultipleObjects(GS_MAX_RX_URBS, dev->rxevents, false, timeout_ms);
+    if (wait_result == WAIT_TIMEOUT) {
+        dev->last_error = GSUSB_ERR_READ_TIMEOUT;
+        return false;
     }
-    return retval;
+
+    if ( (wait_result < WAIT_OBJECT_0) || (wait_result >= WAIT_OBJECT_0 + GS_MAX_RX_URBS) ) {
+        dev->last_error = GSUSB_ERR_READ_WAIT;
+        return false;
+    }
+
+    DWORD urb_num = wait_result - WAIT_OBJECT_0;
+    DWORD bytes_transfered;
+
+    if (!WinUsb_GetOverlappedResult(dev->winUSBHandle, &dev->rxurbs[urb_num].ovl, &bytes_transfered, false)) {
+        gsusb_prepare_read(dev, urb_num);
+        dev->last_error = GSUSB_ERR_READ_RESULT;
+        return false;
+    }
+
+    if (bytes_transfered != sizeof(*frame)) {
+        gsusb_prepare_read(dev, urb_num);
+        dev->last_error = GSUSB_ERR_READ_SIZE;
+        return false;
+    }
+
+    memcpy(frame, dev->rxurbs[urb_num].buf, sizeof(*frame));
+
+    return gsusb_prepare_read(dev, urb_num);
 }
 
 static bool gsusb_read_di(HDEVINFO hdi, SP_DEVICE_INTERFACE_DATA interfaceData, struct gsusb_device *dev)
@@ -347,6 +396,10 @@ static bool gsusb_read_di(HDEVINFO hdi, SP_DEVICE_INTERFACE_DATA interfaceData, 
     /* get required length first (this call always fails with an error) */
     ULONG requiredLength=0;
     SetupDiGetDeviceInterfaceDetail(hdi, &interfaceData, NULL, 0, &requiredLength, NULL);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        dev->last_error = GSUSB_ERR_SETUPDI_IF_DETAILS;
+        return false;
+    }
 
     PSP_DEVICE_INTERFACE_DETAIL_DATA detail_data =
         (PSP_DEVICE_INTERFACE_DETAIL_DATA) LocalAlloc(LMEM_FIXED, requiredLength);
@@ -354,15 +407,20 @@ static bool gsusb_read_di(HDEVINFO hdi, SP_DEVICE_INTERFACE_DATA interfaceData, 
     if (detail_data != NULL) {
         detail_data->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
     } else {
+        dev->last_error = GSUSB_ERR_MALLOC;
         return false;
     }
 
-    bool retval = false;
+    bool retval = true;
     ULONG length = requiredLength;
-    if ( SetupDiGetDeviceInterfaceDetail(hdi, &interfaceData, detail_data, length, &requiredLength, NULL) ) {
-        dev->state = gsusb_devstate_inuse;
-        retval = !FAILED(StringCchCopy(dev->path, sizeof(dev->path), detail_data->DevicePath));
+    if (!SetupDiGetDeviceInterfaceDetail(hdi, &interfaceData, detail_data, length, &requiredLength, NULL) ) {
+        dev->last_error = GSUSB_ERR_SETUPDI_IF_DETAILS2;
+        retval = false;
+    } else if (FAILED(StringCchCopy(dev->path, sizeof(dev->path), detail_data->DevicePath))) {
+        dev->last_error = GSUSB_ERR_PATH_LEN;
+        retval = false;
     }
+
     LocalFree(detail_data);
 
     if (!retval) {
@@ -377,6 +435,7 @@ static bool gsusb_read_di(HDEVINFO hdi, SP_DEVICE_INTERFACE_DATA interfaceData, 
         dev->state = gsusb_devstate_inuse;
     }
 
+    dev->last_error = GSUSB_ERR_OK;
     return true;
 }
 
@@ -385,19 +444,22 @@ bool gsusb_find_devices(struct gsusb_device *buf, size_t buf_size, uint16_t *num
 
     GUID guid;
     if (CLSIDFromString(L"{c15b4308-04d3-11e6-b3ea-6057189e6443}", &guid) != NOERROR) {
+        buf->last_error = GSUSB_ERR_CLSID;
         return false;
     }
 
     HDEVINFO hdi = SetupDiGetClassDevs(&guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
     if (hdi == INVALID_HANDLE_VALUE) {
+        buf->last_error = GSUSB_ERR_GET_DEVICES;
         return false;
     }
 
-    bool retval = false;
+    bool rv = false;
     *num_devices = 0;
 
     unsigned max_results = buf_size / sizeof(*buf);
 
+    buf->last_error = GSUSB_ERR_OK;
     for (unsigned i=0; i<GSUSB_MAX_DEVICES; i++) {
 
         SP_DEVICE_INTERFACE_DATA interfaceData;
@@ -407,6 +469,7 @@ bool gsusb_find_devices(struct gsusb_device *buf, size_t buf_size, uint16_t *num
 
             if (i<max_results) {
                 if (!gsusb_read_di(hdi, interfaceData, &buf[i])) {
+                    buf->last_error = buf[i].last_error;
                     break;
                 }
             }
@@ -415,7 +478,9 @@ bool gsusb_find_devices(struct gsusb_device *buf, size_t buf_size, uint16_t *num
             DWORD err = GetLastError();
             if (err==ERROR_NO_MORE_ITEMS) {
                 *num_devices = i;
-                retval = true;
+                rv = true;
+            } else {
+                buf->last_error = GSUSB_ERR_SETUPDI_IF_ENUM;
             }
             break;
         }
@@ -424,6 +489,6 @@ bool gsusb_find_devices(struct gsusb_device *buf, size_t buf_size, uint16_t *num
 
     SetupDiDestroyDeviceInfoList(hdi);
 
-    return retval;
+    return rv;
 }
 
