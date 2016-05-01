@@ -218,6 +218,12 @@ bool gsusb_set_bittiming(struct gsusb_device *dev, uint16_t channel, struct gs_d
 
 bool gsusb_set_bitrate(struct gsusb_device *dev, uint16_t channel, uint32_t bitrate)
 {
+
+    if (dev->bt_const.fclk_can != 48000000) {
+        /* this function only works for the candleLight base clock of 48MHz */
+        return false;
+    }
+
     struct gs_device_bittiming t;
     t.prop_seg = 1;
     t.sjw = 1;
