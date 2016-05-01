@@ -48,6 +48,7 @@ static bool gsusb_open_device(struct gsusb_device *dev)
     }
 
     dev->interfaceNumber = ifaceDescriptor.bInterfaceNumber;
+    unsigned pipes_found = 0;
 
     for (uint8_t i=0; i<ifaceDescriptor.bNumEndpoints; i++) {
 
@@ -58,17 +59,24 @@ static bool gsusb_open_device(struct gsusb_device *dev)
         if (pipeInfo.PipeType == UsbdPipeTypeBulk && USB_ENDPOINT_DIRECTION_IN(pipeInfo.PipeId)) {
 
             dev->bulkInPipe = pipeInfo.PipeId;
+            pipes_found++;
 
         } else if(pipeInfo.PipeType == UsbdPipeTypeBulk && USB_ENDPOINT_DIRECTION_OUT(pipeInfo.PipeId)) {
 
             dev->bulkOutPipe = pipeInfo.PipeId;
+            pipes_found++;
 
         } else {
-
+            printf("error parsing interface descriptor (unknown endpoint %d)\n", i);
             return false;
 
         }
 
+    }
+
+    if (pipes_found != 2) {
+        printf("error parsing interface descriptor (%d endpoints found, %d expected)\n", pipes_found, 2);
+        return false;
     }
 
     if (!gsusb_set_host_format(dev)) {
