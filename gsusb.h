@@ -16,18 +16,16 @@ typedef enum {
     gsusb_devstate_inuse
 } gsusb_devstate_t;
 
-struct gsusb_device_info {
-    wchar_t path[256];
-    uint16_t channels;
-    gsusb_devstate_t state;
-};
-
 struct rx_urb {
     OVERLAPPED ovl;
     uint8_t buf[64];
 };
 
 struct gsusb_device {
+    wchar_t path[256];
+    gsusb_devstate_t state;
+
+    HANDLE deviceHandle;
     WINUSB_INTERFACE_HANDLE winUSBHandle;
     UCHAR interfaceNumber;
     UCHAR bulkInPipe;
@@ -40,9 +38,8 @@ struct gsusb_device {
 
 };
 
-bool gsusb_find_devices(struct gsusb_device_info *buf, size_t buf_size, uint16_t *num_devices);
-bool gsusb_get_device_path(wchar_t *path, size_t len);
-bool gsusb_open(struct gsusb_device *dev, wchar_t *path);
+bool gsusb_find_devices(struct gsusb_device *buf, size_t buf_size, uint16_t *num_devices);
+bool gsusb_open(struct gsusb_device *dev);
 bool gsusb_set_device_mode(struct gsusb_device *dev, uint16_t channel, uint32_t mode, uint32_t flags);
 bool gsusb_reset(struct gsusb_device *dev);
 bool gsusb_set_bittiming(struct gsusb_device *dev, uint16_t channel, struct gs_device_bittiming *data);

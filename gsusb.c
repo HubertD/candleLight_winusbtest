@@ -12,148 +12,19 @@ static bool gsusb_prepare_read(struct gsusb_device *dev, unsigned urb_num);
 static bool gsusb_set_host_format(struct gsusb_device *dev);
 static bool gsusb_get_device_info(struct gsusb_device *dev, struct gs_device_config *dconf);
 static bool gsusb_get_bittiming_const(struct gsusb_device *dev, uint16_t channel, struct gs_device_bt_const *data);
-
-static bool gsusb_read_di(HDEVINFO hdi, SP_DEVICE_INTERFACE_DATA interfaceData, struct gsusb_device_info *info)
-{
-    /* get required length first (this call always fails with an error) */
-    ULONG requiredLength=0;
-    SetupDiGetDeviceInterfaceDetail(hdi, &interfaceData, NULL, 0, &requiredLength, NULL);
-
-    PSP_DEVICE_INTERFACE_DETAIL_DATA detail_data =
-        (PSP_DEVICE_INTERFACE_DETAIL_DATA) LocalAlloc(LMEM_FIXED, requiredLength);
-
-    if (detail_data != NULL) {
-        detail_data->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
-    } else {
-        return false;
-    }
-
-    bool retval = false;
-    ULONG length = requiredLength;
-    if ( SetupDiGetDeviceInterfaceDetail(hdi, &interfaceData, detail_data, length, &requiredLength, NULL) ) {
-        info->channels = 1;
-        info->state = gsusb_devstate_avail;
-        retval = !FAILED(StringCchCopy(info->path, sizeof(info->path), detail_data->DevicePath));
-    }
-    LocalFree(detail_data);
-
-    return retval;
-}
-
-bool gsusb_find_devices(struct gsusb_device_info *buf, size_t buf_size, uint16_t *num_devices)
-{
-
-    GUID guid;
-    if (CLSIDFromString(L"{c15b4308-04d3-11e6-b3ea-6057189e6443}", &guid) != NOERROR) {
-        return false;
-    }
-
-    HDEVINFO hdi = SetupDiGetClassDevs(&guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-    if (hdi == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-
-    bool retval = false;
-    *num_devices = 0;
-
-    unsigned max_results = buf_size / sizeof(*buf);
-
-    for (unsigned i=0; i<GSUSB_MAX_DEVICES; i++) {
-
-        SP_DEVICE_INTERFACE_DATA interfaceData;
-        interfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-
-        if (SetupDiEnumDeviceInterfaces(hdi, NULL, &guid, i, &interfaceData)) {
-
-            if (i<max_results) {
-                if (!gsusb_read_di(hdi, interfaceData, &buf[i])) {
-                    break;
-                }
-            }
-
-        } else {
-            DWORD err = GetLastError();
-            if (err==ERROR_NO_MORE_ITEMS) {
-                *num_devices = i;
-                retval = true;
-            }
-            break;
-        }
-
-    }
-
-    SetupDiDestroyDeviceInfoList(hdi);
-
-    return retval;
-}
-
-bool gsusb_get_device_path(wchar_t *path, size_t len)
-{
-    bool retval = false;
-
-    GUID guid;
-    ULONG length;
-    ULONG requiredLength=0;
-
-    SP_DEVICE_INTERFACE_DATA interfaceData;
-    interfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-
-    PSP_DEVICE_INTERFACE_DETAIL_DATA detail_data = NULL;
+static bool gsusb_read_di(HDEVINFO hdi, SP_DEVICE_INTERFACE_DATA interfaceData, struct gsusb_device *dev);
+static bool gsusb_open_device(struct gsusb_device *dev);
+static bool gsusb_close_device(struct gsusb_device *dev);
 
 
-    if (CLSIDFromString(L"{c15b4308-04d3-11e6-b3ea-6057189e6443}", &guid) != NOERROR) {
-        return false;
-    }
-
-    HDEVINFO hdi = SetupDiGetClassDevs(&guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-    if (hdi == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-
-    if (!SetupDiEnumDeviceInterfaces(hdi, NULL, &guid, 0, &interfaceData)) {
-        goto destroy_info_list;
-    }
-
-    SetupDiGetDeviceInterfaceDetail(hdi, &interfaceData, NULL, 0, &requiredLength, NULL);
-
-    detail_data = (PSP_DEVICE_INTERFACE_DETAIL_DATA) LocalAlloc(LMEM_FIXED, requiredLength);
-    if (detail_data != NULL) {
-        detail_data->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
-    } else {
-        goto destroy_info_list;
-    }
-
-    length = requiredLength;
-
-    if (!SetupDiGetDeviceInterfaceDetail(hdi, &interfaceData, detail_data, length, &requiredLength, NULL)) {
-        goto free_detail_data;
-    }
-
-    HRESULT hr = StringCchCopy(path, len, detail_data->DevicePath);
-    if (FAILED(hr)) {
-        goto free_detail_data;
-    }
-
-    retval = true;
-
-free_detail_data:
-    LocalFree(detail_data);
-
-destroy_info_list:
-    SetupDiDestroyDeviceInfoList(hdi);
-
-    return retval;
-}
-
-bool gsusb_open(struct gsusb_device *dev, wchar_t *path)
+static bool gsusb_open_device(struct gsusb_device *dev)
 {
     bool result;
-    HANDLE deviceHandle;
     USB_INTERFACE_DESCRIPTOR ifaceDescriptor;
     WINUSB_PIPE_INFORMATION pipeInfo;
 
-    deviceHandle = CreateFile(
-        path,
+    dev->deviceHandle = CreateFile(
+        dev->path,
         GENERIC_WRITE | GENERIC_READ,
         FILE_SHARE_WRITE | FILE_SHARE_READ,
         NULL,
@@ -162,12 +33,11 @@ bool gsusb_open(struct gsusb_device *dev, wchar_t *path)
         NULL
     );
 
-    if (deviceHandle == INVALID_HANDLE_VALUE) {
+    if (dev->deviceHandle == INVALID_HANDLE_VALUE) {
         return false;
     }
 
-
-    result = WinUsb_Initialize(deviceHandle, &dev->winUSBHandle);
+    result = WinUsb_Initialize(dev->deviceHandle, &dev->winUSBHandle);
     if (!result) {
         return false;
     }
@@ -216,16 +86,31 @@ bool gsusb_open(struct gsusb_device *dev, wchar_t *path)
         return false;
     }
 
-    memset(dev->rxurbs, 0, sizeof(dev->rxurbs));
-    for (unsigned i=0; i<GS_MAX_RX_URBS; i++) {
-        HANDLE ev = CreateEvent(NULL, true, false, NULL);
-        dev->rxevents[i] = ev;
-        dev->rxurbs[i].ovl.hEvent = ev;
-        gsusb_prepare_read(dev, i);
-    }
-
-
     return true;
+}
+
+static bool gsusb_close_device(struct gsusb_device *dev)
+{
+    WinUsb_Free(dev->winUSBHandle);
+    dev->winUSBHandle = NULL;
+    CloseHandle(dev->deviceHandle);
+    dev->deviceHandle = NULL;
+}
+
+bool gsusb_open(struct gsusb_device *dev)
+{
+    if (gsusb_open_device(dev)) {
+        memset(dev->rxurbs, 0, sizeof(dev->rxurbs));
+        for (unsigned i=0; i<GS_MAX_RX_URBS; i++) {
+            HANDLE ev = CreateEvent(NULL, true, false, NULL);
+            dev->rxevents[i] = ev;
+            dev->rxurbs[i].ovl.hEvent = ev;
+            gsusb_prepare_read(dev, i);
+        }
+        return true;
+    } else {
+        return false;
+    }
 }
 
 static bool usb_control_msg(WINUSB_INTERFACE_HANDLE hnd, uint8_t request, uint8_t requesttype, uint16_t value, uint16_t index, void *data, uint16_t size)
@@ -380,3 +265,89 @@ bool gsusb_recv_frame(struct gsusb_device *dev, struct gs_host_frame *frame, uin
     }
     return retval;
 }
+
+static bool gsusb_read_di(HDEVINFO hdi, SP_DEVICE_INTERFACE_DATA interfaceData, struct gsusb_device *dev)
+{
+    /* get required length first (this call always fails with an error) */
+    ULONG requiredLength=0;
+    SetupDiGetDeviceInterfaceDetail(hdi, &interfaceData, NULL, 0, &requiredLength, NULL);
+
+    PSP_DEVICE_INTERFACE_DETAIL_DATA detail_data =
+        (PSP_DEVICE_INTERFACE_DETAIL_DATA) LocalAlloc(LMEM_FIXED, requiredLength);
+
+    if (detail_data != NULL) {
+        detail_data->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+    } else {
+        return false;
+    }
+
+    bool retval = false;
+    ULONG length = requiredLength;
+    if ( SetupDiGetDeviceInterfaceDetail(hdi, &interfaceData, detail_data, length, &requiredLength, NULL) ) {
+        dev->state = gsusb_devstate_inuse;
+        retval = !FAILED(StringCchCopy(dev->path, sizeof(dev->path), detail_data->DevicePath));
+    }
+    LocalFree(detail_data);
+
+    if (!retval) {
+        return false;
+    }
+
+    /* try to open to read device infos and see if it is avail */
+    if (gsusb_open_device(dev)) {
+        gsusb_close_device(dev);
+        dev->state = gsusb_devstate_avail;
+    } else {
+        dev->state = gsusb_devstate_inuse;
+    }
+
+    return true;
+}
+
+bool gsusb_find_devices(struct gsusb_device *buf, size_t buf_size, uint16_t *num_devices)
+{
+
+    GUID guid;
+    if (CLSIDFromString(L"{c15b4308-04d3-11e6-b3ea-6057189e6443}", &guid) != NOERROR) {
+        return false;
+    }
+
+    HDEVINFO hdi = SetupDiGetClassDevs(&guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    if (hdi == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    bool retval = false;
+    *num_devices = 0;
+
+    unsigned max_results = buf_size / sizeof(*buf);
+
+    for (unsigned i=0; i<GSUSB_MAX_DEVICES; i++) {
+
+        SP_DEVICE_INTERFACE_DATA interfaceData;
+        interfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+
+        if (SetupDiEnumDeviceInterfaces(hdi, NULL, &guid, i, &interfaceData)) {
+
+            if (i<max_results) {
+                if (!gsusb_read_di(hdi, interfaceData, &buf[i])) {
+                    break;
+                }
+            }
+
+        } else {
+            DWORD err = GetLastError();
+            if (err==ERROR_NO_MORE_ITEMS) {
+                *num_devices = i;
+                retval = true;
+            }
+            break;
+        }
+
+    }
+
+    SetupDiDestroyDeviceInfoList(hdi);
+
+    return retval;
+}
+

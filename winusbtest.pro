@@ -3,6 +3,7 @@ QT -= gui
 
 CONFIG += c++11
 QMAKE_CFLAGS += -std=c99
+QMAKE_LFLAGS += -static-libgcc
 
 TARGET = winusbtest
 CONFIG += console
