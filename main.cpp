@@ -27,11 +27,14 @@ int main(int argc, char *argv[])
         return -2;
     }
 
-    // TODO set bitrate
+    if (!gsusb_set_bitrate(dev, 0, 500000)) {
+        printf("could not set bitrate.\n");
+        return -3;
+    }
 
     if (!gsusb_set_device_mode(dev, 0, GS_CAN_MODE_START, 0)) {
         printf("could not start device.\n");
-        return -3;
+        return -4;
     }
 
     while (true) {

@@ -42,6 +42,7 @@ bool gsusb_find_devices(struct gsusb_device *buf, size_t buf_size, uint16_t *num
 bool gsusb_open(struct gsusb_device *dev);
 bool gsusb_set_device_mode(struct gsusb_device *dev, uint16_t channel, uint32_t mode, uint32_t flags);
 bool gsusb_reset(struct gsusb_device *dev);
+bool gsusb_set_bitrate(struct gsusb_device *dev, uint16_t channel, uint32_t bitrate);
 bool gsusb_set_bittiming(struct gsusb_device *dev, uint16_t channel, struct gs_device_bittiming *data);
 bool gsusb_send_frame(struct gsusb_device *dev, uint16_t channel, struct gs_host_frame *frame);
 bool gsusb_recv_frame(struct gsusb_device *dev, struct gs_host_frame *frame, uint32_t timeout_ms);

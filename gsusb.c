@@ -95,6 +95,7 @@ static bool gsusb_close_device(struct gsusb_device *dev)
     dev->winUSBHandle = NULL;
     CloseHandle(dev->deviceHandle);
     dev->deviceHandle = NULL;
+    return true;
 }
 
 bool gsusb_open(struct gsusb_device *dev)
@@ -213,6 +214,64 @@ bool gsusb_set_bittiming(struct gsusb_device *dev, uint16_t channel, struct gs_d
     );
 
     return rc;
+}
+
+bool gsusb_set_bitrate(struct gsusb_device *dev, uint16_t channel, uint32_t bitrate)
+{
+    struct gs_device_bittiming t;
+    t.prop_seg = 1;
+    t.sjw = 1;
+    t.phase_seg1 = 13 - t.prop_seg;
+    t.phase_seg2 = 2;
+
+    switch (bitrate) {
+        case 10000:
+            t.brp = 300;
+            break;
+
+        case 20000:
+            t.brp = 150;
+            break;
+
+        case 50000:
+            t.brp = 60;
+            break;
+
+        case 83333:
+            t.brp = 36;
+            break;
+
+        case 100000:
+            t.brp = 30;
+            break;
+
+        case 125000:
+            t.brp = 24;
+            break;
+
+        case 250000:
+            t.brp = 12;
+            break;
+
+        case 500000:
+            t.brp = 6;
+            break;
+
+        case 800000:
+            t.brp = 4;
+            t.phase_seg1 = 12 - t.prop_seg;
+            t.phase_seg2 = 2;
+            break;
+
+        case 1000000:
+            t.brp = 3;
+            break;
+
+        default:
+            return false;
+    }
+
+    return gsusb_set_bittiming(dev, channel, &t);
 }
 
 bool gsusb_send_frame(struct gsusb_device *dev, uint16_t channel, struct gs_host_frame *frame)
