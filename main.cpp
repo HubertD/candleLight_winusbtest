@@ -3,6 +3,23 @@
 
 int main(int argc, char *argv[])
 {
+
+    struct gsusb_device_info devs[16];
+    uint16_t num_devices;
+
+    if (!gsusb_find_devices(devs, sizeof(devs), &num_devices)) {
+        printf("cannot enumerate candleLight devices.\n");
+        return -1;
+    } else {
+        printf("detected %d candleLight device(s):\n", num_devices);
+        for (unsigned i=0; i<num_devices; i++) {
+            struct gsusb_device_info *dev = &devs[i];
+            printf("%d: state=%d ch=%d path=%S\n", i, dev->state, dev->channels, dev->path);
+        }
+        return 0;
+    }
+
+
     wchar_t path[512];
     struct gsusb_device dev;
     //struct gs_device_bittiming timing;
@@ -11,6 +28,8 @@ int main(int argc, char *argv[])
     if (!gsusb_get_device_path(path, sizeof(path))) {
         printf("candleLight device not found.\n");
         return -1;
+    } else {
+        printf("found candleLight device: %S\n", path);
     }
 
     if (!gsusb_open(&dev, path)) {

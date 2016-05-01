@@ -13,6 +13,80 @@ static bool gsusb_set_host_format(struct gsusb_device *dev);
 static bool gsusb_get_device_info(struct gsusb_device *dev, struct gs_device_config *dconf);
 static bool gsusb_get_bittiming_const(struct gsusb_device *dev, uint16_t channel, struct gs_device_bt_const *data);
 
+static bool gsusb_read_di(HDEVINFO hdi, SP_DEVICE_INTERFACE_DATA interfaceData, struct gsusb_device_info *info)
+{
+    /* get required length first (this call always fails with an error) */
+    ULONG requiredLength=0;
+    SetupDiGetDeviceInterfaceDetail(hdi, &interfaceData, NULL, 0, &requiredLength, NULL);
+
+    PSP_DEVICE_INTERFACE_DETAIL_DATA detail_data =
+        (PSP_DEVICE_INTERFACE_DETAIL_DATA) LocalAlloc(LMEM_FIXED, requiredLength);
+
+    if (detail_data != NULL) {
+        detail_data->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+    } else {
+        return false;
+    }
+
+    bool retval = false;
+    ULONG length = requiredLength;
+    if ( SetupDiGetDeviceInterfaceDetail(hdi, &interfaceData, detail_data, length, &requiredLength, NULL) ) {
+        info->channels = 1;
+        info->state = gsusb_devstate_avail;
+        retval = !FAILED(StringCchCopy(info->path, sizeof(info->path), detail_data->DevicePath));
+    }
+    LocalFree(detail_data);
+
+    return retval;
+}
+
+bool gsusb_find_devices(struct gsusb_device_info *buf, size_t buf_size, uint16_t *num_devices)
+{
+
+    GUID guid;
+    if (CLSIDFromString(L"{c15b4308-04d3-11e6-b3ea-6057189e6443}", &guid) != NOERROR) {
+        return false;
+    }
+
+    HDEVINFO hdi = SetupDiGetClassDevs(&guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    if (hdi == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    bool retval = false;
+    *num_devices = 0;
+
+    unsigned max_results = buf_size / sizeof(*buf);
+
+    for (unsigned i=0; i<GSUSB_MAX_DEVICES; i++) {
+
+        SP_DEVICE_INTERFACE_DATA interfaceData;
+        interfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+
+        if (SetupDiEnumDeviceInterfaces(hdi, NULL, &guid, i, &interfaceData)) {
+
+            if (i<max_results) {
+                if (!gsusb_read_di(hdi, interfaceData, &buf[i])) {
+                    break;
+                }
+            }
+
+        } else {
+            DWORD err = GetLastError();
+            if (err==ERROR_NO_MORE_ITEMS) {
+                *num_devices = i;
+                retval = true;
+            }
+            break;
+        }
+
+    }
+
+    SetupDiDestroyDeviceInfoList(hdi);
+
+    return retval;
+}
+
 bool gsusb_get_device_path(wchar_t *path, size_t len)
 {
     bool retval = false;
