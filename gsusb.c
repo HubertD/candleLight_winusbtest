@@ -19,10 +19,6 @@ static bool gsusb_close_device(struct gsusb_device *dev);
 
 static bool gsusb_open_device(struct gsusb_device *dev)
 {
-    bool result;
-    USB_INTERFACE_DESCRIPTOR ifaceDescriptor;
-    WINUSB_PIPE_INFORMATION pipeInfo;
-
     dev->deviceHandle = CreateFile(
         dev->path,
         GENERIC_WRITE | GENERIC_READ,
@@ -37,14 +33,13 @@ static bool gsusb_open_device(struct gsusb_device *dev)
         return false;
     }
 
-    result = WinUsb_Initialize(dev->deviceHandle, &dev->winUSBHandle);
-    if (!result) {
-        return false;
+    if (!WinUsb_Initialize(dev->deviceHandle, &dev->winUSBHandle)) {
+        goto close_handle;
     }
 
-    result = WinUsb_QueryInterfaceSettings(dev->winUSBHandle, 0, &ifaceDescriptor);
-    if (!result) {
-        return false;
+    USB_INTERFACE_DESCRIPTOR ifaceDescriptor;
+    if (!WinUsb_QueryInterfaceSettings(dev->winUSBHandle, 0, &ifaceDescriptor)) {
+        goto winusb_free;
     }
 
     dev->interfaceNumber = ifaceDescriptor.bInterfaceNumber;
@@ -52,8 +47,9 @@ static bool gsusb_open_device(struct gsusb_device *dev)
 
     for (uint8_t i=0; i<ifaceDescriptor.bNumEndpoints; i++) {
 
+        WINUSB_PIPE_INFORMATION pipeInfo;
         if (!WinUsb_QueryPipe(dev->winUSBHandle, 0, i, &pipeInfo)) {
-            return false;
+            goto winusb_free;
         }
 
         if (pipeInfo.PipeType == UsbdPipeTypeBulk && USB_ENDPOINT_DIRECTION_IN(pipeInfo.PipeId)) {
@@ -68,7 +64,7 @@ static bool gsusb_open_device(struct gsusb_device *dev)
 
         } else {
             printf("error parsing interface descriptor (unknown endpoint %d)\n", i);
-            return false;
+            goto winusb_free;
 
         }
 
@@ -76,25 +72,32 @@ static bool gsusb_open_device(struct gsusb_device *dev)
 
     if (pipes_found != 2) {
         printf("error parsing interface descriptor (%d endpoints found, %d expected)\n", pipes_found, 2);
-        return false;
+        goto winusb_free;
     }
 
     if (!gsusb_set_host_format(dev)) {
         printf("could not set host format.\n");
-        return false;
+        goto winusb_free;
     }
 
     if (!gsusb_get_device_info(dev, &dev->dconf)) {
         printf("could not read device info.\n");
-        return false;
+        goto winusb_free;
     }
 
     if (!gsusb_get_bittiming_const(dev, 0, &dev->bt_const)) {
         printf("could not read bit timing constraints from device.\n");
-        return false;
+        goto winusb_free;
     }
 
     return true;
+
+winusb_free:
+    WinUsb_Free(dev->winUSBHandle);
+
+close_handle:
+    CloseHandle(dev->deviceHandle);
+    return false;
 }
 
 static bool gsusb_close_device(struct gsusb_device *dev)
