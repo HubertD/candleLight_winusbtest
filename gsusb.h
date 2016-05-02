@@ -78,6 +78,7 @@ bool gsusb_set_bitrate(struct gsusb_device *dev, uint16_t channel, uint32_t bitr
 bool gsusb_set_bittiming(struct gsusb_device *dev, uint16_t channel, struct gs_device_bittiming *data);
 bool gsusb_send_frame(struct gsusb_device *dev, uint16_t channel, struct gs_host_frame *frame);
 bool gsusb_recv_frame(struct gsusb_device *dev, struct gs_host_frame *frame, uint32_t timeout_ms);
+gsusb_err_t gsusb_last_error(struct gsusb_device *dev);
 
 #ifdef __cplusplus
 }

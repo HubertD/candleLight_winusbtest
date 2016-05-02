@@ -492,3 +492,7 @@ bool gsusb_find_devices(struct gsusb_device *buf, size_t buf_size, uint16_t *num
     return rv;
 }
 
+gsusb_err_t gsusb_last_error(struct gsusb_device *dev)
+{
+    return dev->last_error;
+}
