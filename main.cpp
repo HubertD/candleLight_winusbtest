@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
     struct gs_host_frame frame;
 
     if (!gsusb_open(dev)) {
-        printf("could not open candleLight device.\n");
+        printf("could not open candleLight device (%d)\n", gsusb_last_error(dev));
         return -2;
     }
 
@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
                 continue;
             }
 
-            printf("Caught CAN frame: ID 0x%08x [%d]", frame.can_id, frame.can_dlc);
+            printf("%10d ID 0x%08x [%d]", frame.timestamp_us, frame.can_id, frame.can_dlc);
             for (int i=0; i<frame.can_dlc; i++) {
                  printf(" %02X", frame.data[i]);
             }

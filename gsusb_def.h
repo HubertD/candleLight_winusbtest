@@ -18,7 +18,10 @@ enum gs_usb_breq {
     GS_USB_BREQ_MODE,
     GS_USB_BREQ_BERR,
     GS_USB_BREQ_BT_CONST,
-    GS_USB_BREQ_DEVICE_CONFIG
+    GS_USB_BREQ_DEVICE_CONFIG,
+
+    CANDLELIGHT_TIMESTAMP_GET = 0x40,
+    CANDLELIGHT_TIMESTAMP_ENABLE = 0x41,
 };
 
 enum gs_can_mode {
@@ -110,6 +113,8 @@ struct gs_host_frame {
     u8 reserved;
 
     u8 data[8];
+
+    u32 timestamp_us;
 } __packed;
 /* The GS USB devices make use of the same flags and masks as in
  * linux/can.h and linux/can/error.h, and no additional mapping is necessary.

@@ -10,12 +10,12 @@
 static bool usb_control_msg(WINUSB_INTERFACE_HANDLE hnd, uint8_t request, uint8_t requesttype, uint16_t value, uint16_t index, void *data, uint16_t size);
 static bool gsusb_prepare_read(struct gsusb_device *dev, unsigned urb_num);
 static bool gsusb_set_host_format(struct gsusb_device *dev);
+static bool gsusb_set_timestamp_mode(struct gsusb_device *dev, bool enable_timestamps);
 static bool gsusb_get_device_info(struct gsusb_device *dev, struct gs_device_config *dconf);
 static bool gsusb_get_bittiming_const(struct gsusb_device *dev, uint16_t channel, struct gs_device_bt_const *data);
 static bool gsusb_read_di(HDEVINFO hdi, SP_DEVICE_INTERFACE_DATA interfaceData, struct gsusb_device *dev);
 static bool gsusb_open_device(struct gsusb_device *dev);
 static bool gsusb_close_device(struct gsusb_device *dev);
-
 
 static bool gsusb_open_device(struct gsusb_device *dev)
 {
@@ -79,6 +79,11 @@ static bool gsusb_open_device(struct gsusb_device *dev)
 
     if (!gsusb_set_host_format(dev)) {
         dev->last_error = GSUSB_ERR_SET_HOST_FORMAT;
+        goto winusb_free;
+    }
+
+    if (!gsusb_set_timestamp_mode(dev, true)) {
+        dev->last_error = GSUSB_ERR_SET_TIMESTAMP_MODE;
         goto winusb_free;
     }
 
@@ -176,6 +181,24 @@ static bool gsusb_set_host_format(struct gsusb_device *dev)
     );
 
     dev->last_error = rc ? GSUSB_ERR_OK : GSUSB_ERR_SET_HOST_FORMAT;
+    return rc;
+}
+
+static bool gsusb_set_timestamp_mode(struct gsusb_device *dev, bool enable_timestamps)
+{
+    uint32_t ts_config = enable_timestamps ? 1 : 0;
+
+    bool rc = usb_control_msg(
+        dev->winUSBHandle,
+        CANDLELIGHT_TIMESTAMP_ENABLE,
+        USB_DIR_OUT|USB_TYPE_VENDOR|USB_RECIP_INTERFACE,
+        1,
+        ts_config,
+        NULL,
+        0
+    );
+
+    dev->last_error = rc ? GSUSB_ERR_OK : GSUSB_ERR_SET_TIMESTAMP_MODE;
     return rc;
 }
 

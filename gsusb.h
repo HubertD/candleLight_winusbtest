@@ -39,7 +39,7 @@ typedef enum {
     GSUSB_ERR_CLSID               = -23,
     GSUSB_ERR_GET_DEVICES         = -24,
     GSUSB_ERR_SETUPDI_IF_ENUM     = -25,
-
+    GSUSB_ERR_SET_TIMESTAMP_MODE  = -26
 } gsusb_err_t;
 
 typedef enum {
